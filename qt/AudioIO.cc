@@ -104,7 +104,13 @@ void AudioIO::initHW(QAudioDeviceInfo inDevice)
   audioFormat.setChannelCount(1); // mono sound
   audioFormat.setSampleRate(fSample); // mono sound
   audioFormat.setCodec("audio/pcm");
-  audioFormat.setByteOrder(QAudioFormat::LittleEndian);
+  // Use native byte order so audio samples are not byte-swapped on
+  // big-endian hosts (PowerPC).  QSysInfo::ByteOrder reflects the
+  // actual endianness of the CPU at compile time.
+  audioFormat.setByteOrder(
+      (QSysInfo::ByteOrder == QSysInfo::LittleEndian)
+          ? QAudioFormat::LittleEndian
+          : QAudioFormat::BigEndian);
   audioFormat.setSampleType(QAudioFormat::Float);
   audioFormat.setSampleSize(32);
 
@@ -146,7 +152,7 @@ QList<QAudioDeviceInfo>  AudioIO::getDevices()
 void AudioIO::setNotifyInterval(int ms)
 {
   notifyInterval = ms;
-  if (audioInput != NULL and notifyInterval > -1) 
+  if (audioInput != NULL && notifyInterval > -1) 
     audioInput->setNotifyInterval(notifyInterval);
 
 }
@@ -196,8 +202,11 @@ qint64 AudioIO::getAudio(float *inBuffer, int maxSamples)
       // Scale factor for float conversion
       float scale = float( 1.0/(2<<(dataSize*8 - 2)) );
 
-      qint32 intBuf[maxSamples];
-      readSamples = IODevice->read((char *)intBuf, bytesToRead)/dataSize;
+      // QVarLengthArray is a C++98-compatible, Qt4-available alternative
+      // to a C99 VLA.  It uses the stack for small sizes and falls back to
+      // the heap for large ones, avoiding undefined stack overflow.
+      QVarLengthArray<qint32> intBuf(maxSamples);
+      readSamples = IODevice->read((char *)intBuf.data(), bytesToRead)/dataSize;
 
       // Convert to float, write to buffer
       for (int i = 0; i < readSamples; i++)

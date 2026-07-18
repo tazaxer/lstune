@@ -1,5 +1,10 @@
 #!/bin/sh
-qmake -spec macx-g++
+# Build a ppc/x86 universal binary for Mac OS X 10.4+ using Qt 4.6-4.8 Carbon.
+# Requires: Xcode 3.1.x, MacOSX10.4u SDK, Qt Carbon in PATH.
+qmake -spec macx-g++ \
+    "CONFIG+=ppc x86" \
+    QMAKE_MAC_SDK=/Developer/SDKs/MacOSX10.4u.sdk \
+    QMAKE_MACOSX_DEPLOYMENT_TARGET=10.4
 
 make -f Makefile.Release clean
 make -f Makefile.Release -j4

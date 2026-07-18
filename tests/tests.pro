@@ -7,6 +7,13 @@ TARGET = notes_test
 DEPENDPATH += .
 INCLUDEPATH += . ../qt
 
+macx {
+  # PowerPC / Intel universal-binary settings (mirrors qt/lstune.pro).
+  CONFIG += ppc x86
+  QMAKE_MAC_SDK = /Developer/SDKs/MacOSX10.4u.sdk
+  QMAKE_MACOSX_DEPLOYMENT_TARGET = 10.4
+}
+
 # Input
 HEADERS += ../qt/notes.h
 SOURCES += ../qt/notes.cc notes_test.cc

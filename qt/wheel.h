@@ -20,7 +20,11 @@
 #define WHEEL_H
 
 #include <QtCore>
-#include <QtWidgets>
+#if QT_VERSION >= 0x050000
+#  include <QtWidgets>
+#else
+#  include <QtGui>
+#endif
 
 using namespace std;
 

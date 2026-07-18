@@ -16,7 +16,11 @@
  * with LSTune. If not, see http://www.gnu.org/licenses/.
  */
 #include <QtCore>
-#include <QtWidgets>
+#if QT_VERSION >= 0x050000
+#  include <QtWidgets>
+#else
+#  include <QtGui>
+#endif
 // #include <QtMultimedia>
 
 #include "sound.h"

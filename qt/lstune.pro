@@ -10,7 +10,8 @@ DEPENDPATH += .
 INCLUDEPATH += .
 CONFIG += debug_and_release
 # LIBS += 
-QT += widgets
+# Qt 5 uses the 'widgets' module; Qt 4 includes everything in 'gui'.
+greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
 # Need to include this for Qt 4.6. This was pulled into qt moblity for 4.7
 exists($$[QT_INSTALL_HEADERS]/QtMultimedia) {
@@ -36,6 +37,16 @@ unix {
 macx {
   DEFINES += BUILD_LINUX=0 BUILD_WIN32=0 BUILD_MACX=1
   ICON = ../misc/fish.icns
+
+  # ---------------------------------------------------------------------------
+  # PowerPC / Intel universal-binary settings.
+  # Requires: Xcode 3.1.x, Qt 4.6-4.8 Carbon, MacOSX10.4u SDK.
+  # This produces a fat binary that runs on both G4 and G5 (generic baseline;
+  # no -mcpu=970 or -mpowerpc64 flags are set here).
+  # ---------------------------------------------------------------------------
+  CONFIG += ppc x86
+  QMAKE_MAC_SDK = /Developer/SDKs/MacOSX10.4u.sdk
+  QMAKE_MACOSX_DEPLOYMENT_TARGET = 10.4
 }
 
 # Input

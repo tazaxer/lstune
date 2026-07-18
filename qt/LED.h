@@ -1,5 +1,9 @@
 #include <QtCore>
-#include <QtWidgets>
+#if QT_VERSION >= 0x050000
+#  include <QtWidgets>
+#else
+#  include <QtGui>
+#endif
 
 #ifndef LED_H
 #define LED_H
