@@ -32,14 +32,19 @@ fltType *dtFilter::get_outbuf()
 
 int dtFilter::filter(int toFilter)
 {
-  // A 4th-order bandpass filter tailored specifically for Bass Guitar (48000Hz fs).
-  // 2nd-order Butterworth Highpass @ 10Hz to remove DC rumble
-  // 2nd-order Butterworth Lowpass  @ 250Hz to remove high harmonics that confuse strobe/zero-cross tracking
+  // A coefficients for a band pass filter with a 44100Hz sample frequency
+  // This consists of a 1st order high pass filter at 30Hz, and a an 8th order
+  // Type 1 Chebychev LP filter with a corner frequency of 2Khz with 4% passband ripple
+  // This results in a 9th order system.
   // Coefficients for x(k), x(k-1), .... x(k-n)
-  const fltType cx[] = {2.614106e-04, 0.000000e+00, -5.228212e-04, 0.000000e+00, 2.614106e-04};
+  const fltType cx[] = {9.684457e-07, 6.779120e-06, 1.936891e-05, 2.711648e-05, 
+			1.355824e-05, -1.355824e-05, -2.711648e-05, -1.936891e-05,
+			-6.779120e-06, -9.684457e-07};
 
   // Coefficients for y(k), y(k-1), .... y(k-n)
-  const fltType cy[] = {1.000000e+00, -3.951877e+00, 5.856764e+00, -3.857896e+00, 9.530087e-01};
+  const fltType cy[] = {0, -7.616874e+00, 2.634041e+01, -5.424242e+01,
+			7.325881e+01, -6.726091e+01, 4.196424e+01, -1.715111e+01,
+			4.166027e+00, -4.581673e-01};
 
   // Actually do the filtering
   int in_bounds = order + toFilter;
