@@ -25,8 +25,8 @@ typedef float fltType;
 class dtFilter
 {
 private:
-  // Order of system
-  static const int order = 9;
+  // Order of system (Changed to 4 for 2nd-order HPF + 2nd-order LPF bass filter)
+  static const int order = 4;
 
   // Length of buffer, including wrap-aroudn padding
   int buffer_length;

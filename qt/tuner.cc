@@ -56,13 +56,37 @@ Tuner::Tuner(QWidget *parent)
    LED *sharpLED = new LED(this);
    flatLED->setState(false);
    sharpLED->setState(false);
-   QLabel *flatLabel  = new QLabel("<<<< Flat <<<<",  this);
-   QLabel *sharpLabel = new QLabel(">>>> Sharp >>>>", this);
+   QLabel *flatLabel  = new QLabel("<<< FLAT",  this);
+   QLabel *sharpLabel = new QLabel("SHARP >>>", this);
    sharpLabel->setAlignment(Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter);
+   flatLabel->setObjectName("flatLabel");
+   sharpLabel->setObjectName("sharpLabel");
+   
    ui.sharpFlatLayout->addWidget(flatLED);
    ui.sharpFlatLayout->addWidget(flatLabel);
    ui.sharpFlatLayout->addWidget(sharpLabel);
    ui.sharpFlatLayout->addWidget(sharpLED);
+
+   // HIDE unnecessary controls for a clean Bass Tuner UI
+   ui.A4SpinBox->hide();
+   ui.A4Label->hide();
+   ui.noiseGateSpinBox->hide();
+   ui.noiseGateLabel->hide();
+   ui.autoDetect->hide();
+   ui.noteSelBox->hide();
+   ui.freqLabel->hide();
+
+   // Apply Dark Mode Stage Theme
+   this->setStyleSheet(
+       "QWidget { background-color: #111111; color: #FFFFFF; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }"
+       "QLabel { font-size: 24px; font-weight: bold; }"
+       "QLabel#noteDisp { font-size: 140px; color: #00E676; border: none; }"
+       "QLabel#flatLabel { color: #FF3D00; font-size: 36px; }"
+       "QLabel#sharpLabel { color: #FF3D00; font-size: 36px; }"
+       "QLCDNumber { color: #00E676; background-color: #222222; border: 2px solid #333333; }"
+   );
+   
+   ui.noteDisp->setAlignment(Qt::AlignCenter);
 
    // Create timer to process audio input
    aProc = new AudioProc(fsample, &notes);

@@ -130,8 +130,9 @@ void AudioProc::readAudio()
   filter->filter(readFrames);  // Process buffer
 
   // Maximum number of samples that are allowed to pass before an update to the screen.
-  // The prevents if from staying lit up with zero input
-  int maxNoUpdate = fSample/10;
+  // The prevents if from staying lit up with zero input. 
+  // Changed to fSample/5 (200ms) to better capture slow-moving low bass frequencies.
+  int maxNoUpdate = fSample/5;
   float peakVal = -1e6;
   int peakTime = -1;
   // Process the results
