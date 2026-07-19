@@ -44,7 +44,7 @@ macx {
   # This produces a fat binary that runs on both G4 and G5 (generic baseline;
   # no -mcpu=970 or -mpowerpc64 flags are set here).
   # ---------------------------------------------------------------------------
-  CONFIG += ppc x86
+  CONFIG += ppc
   QMAKE_MAC_SDK = /Developer/SDKs/MacOSX10.4u.sdk
   QMAKE_MACOSX_DEPLOYMENT_TARGET = 10.4
 }
