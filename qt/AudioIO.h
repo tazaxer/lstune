@@ -24,6 +24,7 @@
 #include <QBuffer>
 #include <QWidget>
 #include <QTimer>
+#include <QAudioInput>
 #include "filter.h"
 
 class AudioIO : public QWidget
@@ -42,6 +43,10 @@ public slots:
   void stop();
   void switchDevice(int deviceIndex);
 
+private slots:
+  void onPollTimer();      // watchdog: replaces unreliable notify() on CoreAudio
+  void onStateChanged(QAudio::State state);
+
  signals:
   void notify();
 
@@ -57,11 +62,15 @@ private:
   QList<QAudioDeviceInfo> devices;
 
   // Read pointer for IODevice
-  qint64 readPointer; 
+  qint64 readPointer;
   qint64 maxBufSize; // Maximum buffer size
   bool started;
 
   int notifyInterval;
+
+  // Watchdog timer — drives audio polling when notify() stalls (Qt4/CoreAudio)
+  QTimer *pollTimer;
+  int pollIntervalMs;
 };
 
 #endif

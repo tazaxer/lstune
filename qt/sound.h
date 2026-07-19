@@ -70,9 +70,9 @@ private:
   dtFilter *filter;
 
   bool strobeState; // State of strobe
-  qint64 fTime; // Counts number of samples since beginning of time
-  int lastUpdate; // Last time wheel was refreshed
-  int prevRise; // Time of previous rise
+  qint64 fTime;       // Counts number of samples since beginning of time
+  qint64 lastUpdate;  // Last time wheel was refreshed
+  qint64 prevRise;    // Time of previous rise
   
   double wheelFreq; // Wheel frequency in Hz
 

@@ -42,10 +42,19 @@ AudioIO::AudioIO(int fsample, int inFrameRate, QWidget *parent)
   IODevice = new QBuffer();
   if (!IODevice->open(QIODevice::ReadWrite))
     qWarning("Unable to open IODevice buffer");
-  readPointer = 0; 
+  readPointer = 0;
 
-  notifyInterval = -1;
-  audioInput = NULL;
+  notifyInterval  = -1;
+  audioInput      = NULL;
+
+  // Watchdog timer: fires every frame period and drives readAudio() even when
+  // QAudioInput::notify() stalls (a known Qt4 CoreAudio / Carbon backend bug
+  // on PowerPC where the stream silently enters IdleState after the first buffer).
+  pollIntervalMs = qMax(1, 1000 / qMax(1, frameRate));
+  pollTimer = new QTimer(this);
+  pollTimer->setInterval(pollIntervalMs);
+  connect(pollTimer, SIGNAL(timeout()), this, SLOT(onPollTimer()));
+
   initHW(QAudioDeviceInfo::defaultInputDevice());
 
   devices = QAudioDeviceInfo::availableDevices(QAudio::AudioInput);
@@ -132,12 +141,17 @@ void AudioIO::initHW(QAudioDeviceInfo inDevice)
     }
 
   audioInput = new QAudioInput(info, audioFormat, this);
-  if (notifyInterval > -1) 
+  if (notifyInterval > -1)
     audioInput->setNotifyInterval(notifyInterval);
-  connect(audioInput, SIGNAL(notify()), this, SIGNAL(notify()));
+
+  // Keep the notify() signal wired — it works fine on Linux/Windows.
+  // On Qt4/CoreAudio (Mac PPC) it may stop firing; the pollTimer below
+  // guarantees forward progress regardless.
+  connect(audioInput, SIGNAL(notify()),                    this, SIGNAL(notify()));
+  connect(audioInput, SIGNAL(stateChanged(QAudio::State)), this, SLOT(onStateChanged(QAudio::State)));
 
   // This causes Windows XP to seriously misbehave strange, but it crashed in Linux without it. Fun.
-  if (BUILD_LINUX) 
+  if (BUILD_LINUX)
     audioInput->setBufferSize(1000/frameRate);
 
   // Max buffer size in bytes
@@ -159,16 +173,75 @@ void AudioIO::setNotifyInterval(int ms)
 
 void AudioIO::start()
 {
-  IODevice->seek(0);
-  readPointer = 0; 
+  // Fully reset the QBuffer so the write pointer starts at zero and
+  // no stale data from a previous session can confuse getAudio().
+  IODevice->close();
+  IODevice->setData(QByteArray());
+  if (!IODevice->open(QIODevice::ReadWrite))
+    qWarning("Unable to reopen IODevice buffer");
+  readPointer = 0;
+
   audioInput->start(IODevice);
   started = true;
+
+  // Start the watchdog timer.  It will also call emit notify() so the
+  // slot in AudioProc (readAudio) is driven even if the CoreAudio backend
+  // stops firing QAudioInput::notify().
+  pollTimer->start();
 }
 
 void AudioIO::stop()
 {
+  pollTimer->stop();
   audioInput->stop();
   started = false;
+}
+
+// ---------------------------------------------------------------------------
+// onPollTimer — watchdog slot
+// ---------------------------------------------------------------------------
+// Emits notify() at the configured frame rate regardless of whether
+// QAudioInput::notify() is still firing.  Also detects IdleState and
+// calls resume() so the CoreAudio stream keeps running on PPC.
+void AudioIO::onPollTimer()
+{
+  if (!started)
+    return;
+
+  QAudio::State st = audioInput->state();
+  if (st == QAudio::IdleState) {
+    // CoreAudio silently went idle (common Qt4/PPC bug).
+    // resume() kicks it back into ActiveState without a full stop/start,
+    // which would discard the existing IODevice and reconnect signals.
+    audioInput->resume();
+    qDebug() << "AudioIO: CoreAudio went idle, calling resume()";
+  }
+
+  // Always drive the processing slot — even if notify() is still working
+  // the extra calls are harmless (getAudio() returns 0 if no new data).
+  emit notify();
+}
+
+// ---------------------------------------------------------------------------
+// onStateChanged — log and handle unexpected audio state transitions
+// ---------------------------------------------------------------------------
+void AudioIO::onStateChanged(QAudio::State state)
+{
+  switch (state) {
+    case QAudio::ActiveState:
+      qDebug() << "AudioIO: stream Active";
+      break;
+    case QAudio::IdleState:
+      // Will be caught by onPollTimer on the next tick.
+      qDebug() << "AudioIO: stream went Idle (will resume)";
+      break;
+    case QAudio::StoppedState:
+      if (audioInput->error() != QAudio::NoError)
+        qWarning() << "AudioIO: stream stopped with error" << audioInput->error();
+      break;
+    default:
+      break;
+  }
 }
 
 qint64 AudioIO::getAudio(float *inBuffer, int maxSamples)
