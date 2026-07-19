@@ -153,8 +153,8 @@ void AudioIO::initHW(QAudioDeviceInfo inDevice)
     qDebug() << "Sample type: " << st; // 3 == Float
   qDebug() << "Device name" << info.deviceName();
 
-  audioFormat.setChannelCount(1); // mono sound
-  audioFormat.setSampleRate(fSample); // mono sound
+  audioFormat.setChannelCount(2); // Ask for stereo so we don't miss Input 2
+  audioFormat.setSampleRate(fSample);
   audioFormat.setCodec("audio/pcm");
   // Use native byte order so audio samples are not byte-swapped on
   // big-endian hosts (PowerPC).  QSysInfo::ByteOrder reflects the
@@ -168,7 +168,7 @@ void AudioIO::initHW(QAudioDeviceInfo inDevice)
 
   if (!info.isFormatSupported(audioFormat)) 
     {
-      qWarning() << "Default audio format is not supported. Using nearest available";
+      qWarning() << "Requested audio format is not supported. Using nearest available";
       audioFormat = info.nearestFormat(audioFormat);
       qWarning() << "Channels: " << audioFormat.channelCount();
       qWarning() << "Frequency: " << audioFormat.sampleRate();
@@ -177,9 +177,13 @@ void AudioIO::initHW(QAudioDeviceInfo inDevice)
     }
 
   int sType = audioFormat.sampleType();
-  if ( (sType != QAudioFormat::Float ) || (audioFormat.sampleSize() != 32)) {
-      qWarning("Only floats or 32/16 bit integer samples are supported! Exiting");
-      qWarning() << "Sample Type:" << sType;
+  int sSize = audioFormat.sampleSize();
+  bool isFloat32 = (sType == QAudioFormat::Float && sSize == 32);
+  bool isInt16or32 = (sType == QAudioFormat::SignedInt && (sSize == 16 || sSize == 32));
+  
+  if (!isFloat32 && !isInt16or32) {
+      qWarning("Only 32-bit float or 16/32-bit signed int samples are supported! Exiting");
+      qWarning() << "Sample Type:" << sType << "Size:" << sSize;
       exit(1);
     }
 
@@ -239,43 +243,62 @@ void AudioIO::pollNotify()
   emit notify();
 }
 
-qint64 AudioIO::getAudio(float *inBuffer, int maxSamples)
+qint64 AudioIO::getAudio(float *inBuffer, int maxFrames)
 {
   if (!started || !audioInput) return 0;
 
   QAudioFormat format = audioInput->format();
-  qint64 readSamples;
-
-  // Size of sample data in bytes
-  const qint64 dataSize = format.sampleSize()/8;
+  int channels = format.channelCount();
+  int sampleSize = format.sampleSize();
+  const qint64 bytesPerSample = sampleSize / 8;
+  const qint64 bytesPerFrame = bytesPerSample * channels;
 
   qint64 bytesAvailable = IODevice->bytesAvailable();
-  qint64 bytesToRead = maxSamples * dataSize;
+  qint64 bytesToRead = maxFrames * bytesPerFrame;
   
   if (bytesToRead > bytesAvailable)
-      bytesToRead = (bytesAvailable / dataSize) * dataSize;
+      bytesToRead = (bytesAvailable / bytesPerFrame) * bytesPerFrame;
       
   if (bytesToRead <= 0) return 0;
 
-  if (format.sampleType() == QAudioFormat::Float) // Float. No conversion to do
+  qint64 framesRead = bytesToRead / bytesPerFrame;
+  QByteArray rawData = IODevice->read(bytesToRead);
+  
+  if (format.sampleType() == QAudioFormat::Float && sampleSize == 32) 
     {
-      readSamples = IODevice->read((char *)inBuffer, bytesToRead)/dataSize;
+      float *src = (float *)rawData.constData();
+      for (int i = 0; i < framesRead; i++) {
+          float sum = 0;
+          for (int c = 0; c < channels; c++) {
+              sum += src[i * channels + c];
+          }
+          inBuffer[i] = sum / channels;
+      }
     }
-  else // 32 or 16 bit int
+  else if (sampleSize == 16) // 16-bit integer
     {
-      // Scale factor for float conversion
-      float scale = float( 1.0/(2<<(dataSize*8 - 2)) );
-
-      // QVarLengthArray is a C++98-compatible, Qt4-available alternative
-      // to a C99 VLA.  It uses the stack for small sizes and falls back to
-      // the heap for large ones, avoiding undefined stack overflow.
-      QVarLengthArray<qint32> intBuf(maxSamples);
-      readSamples = IODevice->read((char *)intBuf.data(), bytesToRead)/dataSize;
-
-      // Convert to float, write to buffer
-      for (int i = 0; i < readSamples; i++)
-        inBuffer[i] = float (intBuf[i] * scale);
+      qint16 *src = (qint16 *)rawData.constData();
+      float scale = 1.0f / 32768.0f;
+      for (int i = 0; i < framesRead; i++) {
+          float sum = 0;
+          for (int c = 0; c < channels; c++) {
+              sum += src[i * channels + c] * scale;
+          }
+          inBuffer[i] = sum / channels;
+      }
+    }
+  else if (sampleSize == 32) // 32-bit integer
+    {
+      qint32 *src = (qint32 *)rawData.constData();
+      float scale = 1.0f / 2147483648.0f; // 2^31
+      for (int i = 0; i < framesRead; i++) {
+          float sum = 0;
+          for (int c = 0; c < channels; c++) {
+              sum += src[i * channels + c] * scale;
+          }
+          inBuffer[i] = sum / channels;
+      }
     }
   
-  return readSamples;
+  return framesRead;
 }
