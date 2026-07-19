@@ -44,7 +44,7 @@ public:
     }
     
     QByteArray buffer;
-    QMutex mutex;
+    mutable QMutex mutex;
 
     qint64 readData(char *data, qint64 maxlen) {
         QMutexLocker locker(&mutex);
@@ -70,7 +70,7 @@ public:
     bool isSequential() const { return true; }
     
     qint64 bytesAvailable() const {
-        // Technically QIODevice::bytesAvailable() also exists, but our actual data is in `buffer`.
+        QMutexLocker locker(&mutex);
         return buffer.size() + QIODevice::bytesAvailable();
     }
     
@@ -168,12 +168,16 @@ void AudioIO::initHW(QAudioDeviceInfo inDevice)
 
   if (!info.isFormatSupported(audioFormat)) 
     {
-      qWarning() << "Requested audio format is not supported. Using nearest available";
-      audioFormat = info.nearestFormat(audioFormat);
-      qWarning() << "Channels: " << audioFormat.channelCount();
-      qWarning() << "Frequency: " << audioFormat.sampleRate();
-      qWarning() << "Codec: " << audioFormat.codec();
-      qWarning() << "Sample Size: " << audioFormat.sampleSize();
+      // Safely fall back to 1 channel before asking nearestFormat
+      audioFormat.setChannelCount(1);
+      if (!info.isFormatSupported(audioFormat)) {
+          qWarning() << "Requested audio format is not supported. Using nearest available";
+          audioFormat = info.nearestFormat(audioFormat);
+          qWarning() << "Channels: " << audioFormat.channelCount();
+          qWarning() << "Frequency: " << audioFormat.sampleRate();
+          qWarning() << "Codec: " << audioFormat.codec();
+          qWarning() << "Sample Size: " << audioFormat.sampleSize();
+      }
     }
 
   int sType = audioFormat.sampleType();
@@ -261,8 +265,11 @@ qint64 AudioIO::getAudio(float *inBuffer, int maxFrames)
       
   if (bytesToRead <= 0) return 0;
 
-  qint64 framesRead = bytesToRead / bytesPerFrame;
   QByteArray rawData = IODevice->read(bytesToRead);
+  qint64 actualBytes = rawData.size();
+  qint64 framesRead = actualBytes / bytesPerFrame;
+  
+  if (framesRead <= 0) return 0;
   
   if (format.sampleType() == QAudioFormat::Float && sampleSize == 32) 
     {
