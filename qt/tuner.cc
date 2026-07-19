@@ -70,9 +70,6 @@ Tuner::Tuner(QWidget *parent)
    // HIDE unnecessary controls for a clean Bass Tuner UI
    ui.A4SpinBox->hide();
    ui.A4Label->hide();
-   ui.noiseGateSpinBox->hide();
-   ui.noiseGateLabel->hide();
-   ui.autoDetect->hide();
    ui.noteSelBox->hide();
    ui.freqLabel->hide();
 

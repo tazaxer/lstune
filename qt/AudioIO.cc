@@ -48,7 +48,10 @@ public:
 
     qint64 readData(char *data, qint64 maxlen) {
         QMutexLocker locker(&mutex);
-        qint64 toRead = qMin(maxlen, (qint64)buffer.size());
+        // Enforce 8-byte (stereo 32-bit float) alignment to prevent catastrophic float misreads
+        qint64 avail = buffer.size();
+        avail = (avail / 8) * 8; 
+        qint64 toRead = qMin(maxlen, avail);
         if (toRead > 0) {
             memcpy(data, buffer.constData(), toRead);
             buffer.remove(0, toRead);
@@ -62,7 +65,10 @@ public:
         // keep maximum 2 seconds of audio at 48k float (48000 * 4 * 2 = 384000 bytes)
         int maxSize = 384000;
         if (buffer.size() > maxSize) { 
-             buffer.remove(0, buffer.size() - maxSize);
+             int excess = buffer.size() - maxSize;
+             // CRITICAL: Ensure truncation is aligned to 8-byte frames to prevent permanent misalignment
+             excess = ((excess / 8) + 1) * 8;
+             buffer.remove(0, excess);
         }
         return len;
     }

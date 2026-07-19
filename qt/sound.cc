@@ -29,7 +29,7 @@
 //--------------------------------------
 // Constants
 //--------------------------------------
-const double DEFAULT_HYSTERESIS = 0.02;
+const double DEFAULT_HYSTERESIS = 0.002;
 const int FRAMERATE = 30; // The frequency of getting a frame
 const int SAFTEYMARGIN = 2;
 
