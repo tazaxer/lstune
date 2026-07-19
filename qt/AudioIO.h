@@ -21,10 +21,9 @@
 
 #include <QAudioDeviceInfo>
 #include <QAudioInput>
-#include <QBuffer>
+#include <QIODevice>
 #include <QWidget>
 #include <QTimer>
-#include <QAudioInput>
 #include "filter.h"
 
 class AudioIO : public QWidget
@@ -34,7 +33,7 @@ class AudioIO : public QWidget
 public:
   AudioIO(int fsample, int inFrameRate = 30, QWidget *parent = 0);
   ~AudioIO();
-  void setNotifyInterval(int ms);
+  void setNotifyInterval(int ms); // kept for API compatibility; drives pollTimer
 
 public slots:
   qint64 getAudio(float *inBuffer, int maxSamples);
@@ -44,7 +43,7 @@ public slots:
   void switchDevice(int deviceIndex);
 
 private slots:
-  void onPollTimer();      // watchdog: replaces unreliable notify() on CoreAudio
+  void onPollTimer();
   void onStateChanged(QAudio::State state);
 
  signals:
@@ -52,23 +51,22 @@ private slots:
 
 private:
   void initHW(QAudioDeviceInfo inDevice);
+  void doRestart(); // full stop+start without touching audioInput object
 
   // QT Sound objects
   QAudioInput *audioInput;
-  QBuffer *IODevice;
+  // Pull-mode device: returned by audioInput->start() — no QBuffer needed.
+  QIODevice   *readDevice;
   int fSample, frameRate;
 
   // List of audio devices
   QList<QAudioDeviceInfo> devices;
 
-  // Read pointer for IODevice
-  qint64 readPointer;
-  qint64 maxBufSize; // Maximum buffer size
   bool started;
 
   int notifyInterval;
 
-  // Watchdog timer — drives audio polling when notify() stalls (Qt4/CoreAudio)
+  // Poll timer — drives getAudio() at frame rate and watchdogs IdleState
   QTimer *pollTimer;
   int pollIntervalMs;
 };
