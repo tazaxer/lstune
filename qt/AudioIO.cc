@@ -19,6 +19,8 @@
 #include <math.h>
 #include <stdio.h>
 #include <QtDebug>
+#include <QMutex>
+#include <QMutexLocker>
 
 #include "AudioIO.h"
 #include "noteGuesser.h"
@@ -30,6 +32,55 @@
 const double maxBuffLength = 2.0;
 
 //--------------------------------------
+// Thread-safe ring buffer for QAudioInput
+// On Mac CoreAudio, QAudioInput writes from a high-priority background thread.
+// Reading from the main thread while writing using QBuffer causes extreme 
+// race conditions that eventually crash or freeze the stream.
+//--------------------------------------
+class AudioRingBuffer : public QIODevice {
+public:
+    AudioRingBuffer(QObject *parent = 0) : QIODevice(parent) {
+        open(QIODevice::ReadWrite);
+    }
+    
+    QByteArray buffer;
+    QMutex mutex;
+
+    qint64 readData(char *data, qint64 maxlen) {
+        QMutexLocker locker(&mutex);
+        qint64 toRead = qMin(maxlen, (qint64)buffer.size());
+        if (toRead > 0) {
+            memcpy(data, buffer.constData(), toRead);
+            buffer.remove(0, toRead);
+        }
+        return toRead;
+    }
+
+    qint64 writeData(const char *data, qint64 len) {
+        QMutexLocker locker(&mutex);
+        buffer.append(data, len);
+        // keep maximum 2 seconds of audio at 48k float (48000 * 4 * 2 = 384000 bytes)
+        int maxSize = 384000;
+        if (buffer.size() > maxSize) { 
+             buffer.remove(0, buffer.size() - maxSize);
+        }
+        return len;
+    }
+    
+    bool isSequential() const { return true; }
+    
+    qint64 bytesAvailable() const {
+        // Technically QIODevice::bytesAvailable() also exists, but our actual data is in `buffer`.
+        return buffer.size() + QIODevice::bytesAvailable();
+    }
+    
+    void clear() {
+        QMutexLocker locker(&mutex);
+        buffer.clear();
+    }
+};
+
+//--------------------------------------
 AudioIO::AudioIO(int fsample, int inFrameRate, QWidget *parent)
   : QWidget(parent)
 {
@@ -38,17 +89,15 @@ AudioIO::AudioIO(int fsample, int inFrameRate, QWidget *parent)
   fSample = fsample;
   frameRate = inFrameRate;
 
-  IODevice = new QBuffer();
-  if (!IODevice->open(QIODevice::ReadWrite))
-    qWarning("Unable to open IODevice buffer");
-  readPointer = 0; 
+  // Replaced QBuffer with custom thread-safe ring buffer
+  IODevice = new AudioRingBuffer(this);
 
   notifyInterval = -1;
   audioInput = NULL;
   
-  // Watchdog timer: Emits notify() manually in case CoreAudio stops emitting it
+  // Watchdog timer: Emits notify() manually and revives broken CoreAudio streams
   pollTimer = new QTimer(this);
-  connect(pollTimer, SIGNAL(timeout()), this, SIGNAL(notify()));
+  connect(pollTimer, SIGNAL(timeout()), this, SLOT(pollNotify()));
 
   initHW(QAudioDeviceInfo::defaultInputDevice());
 
@@ -62,7 +111,6 @@ AudioIO::~AudioIO()
     delete audioInput;
 
   IODevice->close();
-  delete IODevice;
 }
 
 
@@ -139,15 +187,11 @@ void AudioIO::initHW(QAudioDeviceInfo inDevice)
   if (notifyInterval > -1) 
     audioInput->setNotifyInterval(notifyInterval);
   
-  // We keep the original connect for notify, but pollTimer will also emit it
   connect(audioInput, SIGNAL(notify()), this, SIGNAL(notify()));
 
   // This causes Windows XP to seriously misbehave strange, but it crashed in Linux without it. Fun.
   if (BUILD_LINUX) 
     audioInput->setBufferSize(1000/frameRate);
-
-  // Max buffer size in bytes
-  maxBufSize = qint64(maxBuffLength * audioFormat.sampleRate() * audioFormat.sampleSize()/8);
 }
 
 QList<QAudioDeviceInfo>  AudioIO::getDevices()
@@ -167,8 +211,7 @@ void AudioIO::setNotifyInterval(int ms)
 
 void AudioIO::start()
 {
-  IODevice->seek(0);
-  readPointer = 0; 
+  ((AudioRingBuffer*)IODevice)->clear();
   audioInput->start(IODevice);
   pollTimer->start();
   started = true;
@@ -177,36 +220,47 @@ void AudioIO::start()
 void AudioIO::stop()
 {
   pollTimer->stop();
-  audioInput->stop();
+  if (audioInput)
+    audioInput->stop();
   started = false;
+}
+
+void AudioIO::pollNotify()
+{
+  if (started && audioInput) {
+    // If CoreAudio stalls and enters IdleState when it shouldn't, forcefully revive it
+    if (audioInput->state() == QAudio::IdleState) {
+        qDebug() << "AudioIO: Stream went idle unexpectedly, forcing restart...";
+        audioInput->stop();
+        ((AudioRingBuffer*)IODevice)->clear();
+        audioInput->start(IODevice);
+    }
+  }
+  emit notify();
 }
 
 qint64 AudioIO::getAudio(float *inBuffer, int maxSamples)
 {
+  if (!started || !audioInput) return 0;
+
   QAudioFormat format = audioInput->format();
   qint64 readSamples;
 
   // Size of sample data in bytes
   const qint64 dataSize = format.sampleSize()/8;
 
-  qint64 writePointer = IODevice->pos();
-  qint64 bytesToRead = writePointer - readPointer;
-  // Number of sampes to get. Max of available sampels, or requested samples
-  qint64 samplesToRead = bytesToRead/dataSize;
-  // qDebug() << "Samples available:" << samplesToRead << "Max:" << maxSamples << "Pos:" << writePointer;
-  bool readAll = true;
-  if (samplesToRead > maxSamples)
-    {
-      samplesToRead = maxSamples;
-      bytesToRead = maxSamples * dataSize;
-      readAll = false;
-    }
-  else
-    writePointer = 0; // We're reading all available data. Reset write pointer to zero
+  qint64 bytesAvailable = IODevice->bytesAvailable();
+  qint64 bytesToRead = maxSamples * dataSize;
+  
+  if (bytesToRead > bytesAvailable)
+      bytesToRead = (bytesAvailable / dataSize) * dataSize;
+      
+  if (bytesToRead <= 0) return 0;
 
-  IODevice->seek(readPointer);
   if (format.sampleType() == QAudioFormat::Float) // Float. No conversion to do
-    readSamples = IODevice->read((char *)inBuffer, bytesToRead)/dataSize;
+    {
+      readSamples = IODevice->read((char *)inBuffer, bytesToRead)/dataSize;
+    }
   else // 32 or 16 bit int
     {
       // Scale factor for float conversion
@@ -223,16 +277,5 @@ qint64 AudioIO::getAudio(float *inBuffer, int maxSamples)
         inBuffer[i] = float (intBuf[i] * scale);
     }
   
-  // Reset buffer if its grown too large, or we've read all the data
-  if (readAll || IODevice->size() > maxBufSize) 
-    {
-      IODevice->seek(0);
-      readPointer = 0;
-    }
-  else
-    {
-      IODevice->seek(writePointer);
-      readPointer += bytesToRead;
-    }
   return readSamples;
 }

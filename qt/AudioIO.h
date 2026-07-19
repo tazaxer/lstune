@@ -21,7 +21,7 @@
 
 #include <QAudioDeviceInfo>
 #include <QAudioInput>
-#include <QBuffer>
+#include <QIODevice>
 #include <QWidget>
 #include <QTimer>
 #include "filter.h"
@@ -42,6 +42,9 @@ public slots:
   void stop();
   void switchDevice(int deviceIndex);
 
+private slots:
+  void pollNotify();
+
  signals:
   void notify();
 
@@ -50,17 +53,13 @@ private:
 
   // QT Sound objects
   QAudioInput *audioInput;
-  QBuffer *IODevice;
+  QIODevice *IODevice;
   int fSample, frameRate;
 
   // List of audio devices
   QList<QAudioDeviceInfo> devices;
 
-  // Read pointer for IODevice
-  qint64 readPointer; 
-  qint64 maxBufSize; // Maximum buffer size
   bool started;
-
   int notifyInterval;
   QTimer *pollTimer;
 };
